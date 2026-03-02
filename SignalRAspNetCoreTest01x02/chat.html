@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SignalR 多分区聊天</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.0/signalr.min.js"></script>
+<style>
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+  :root{
+    --bg-primary:#0a0a0b;
+    --bg-secondary:#111113;
+    --bg-tertiary:#1a1a1d;
+    --bg-hover:#222226;
+    --bg-active:#2a2a2f;
+    --border:#2a2a2e;
+    --border-light:#333338;
+    --text-primary:#ededef;
+    --text-secondary:#a0a0a8;
+    --text-muted:#6b6b74;
+    --accent:#3b82f6;
+    --accent-hover:#2563eb;
+    --accent-soft:rgba(59,130,246,0.12);
+    --green:#22c55e;
+    --green-soft:rgba(34,197,94,0.12);
+    --orange:#f59e0b;
+    --orange-soft:rgba(245,158,11,0.12);
+    --red:#ef4444;
+    --red-soft:rgba(239,68,68,0.12);
+    --bubble-self:#1d4ed8;
+    --bubble-other:#1f1f23;
+    --radius:10px;
+    --radius-sm:6px;
+    --radius-lg:14px;
+    --shadow:0 2px 8px rgba(0,0,0,0.3);
+    --transition:all 0.2s ease;
+  }
+  html,body{
+    height:100%;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+    background:var(--bg-primary);
+    color:var(--text-primary);
+    overflow:hidden;
+  }
+
+  /* ===== Layout ===== */
+  .app{display:flex;height:100vh;width:100%;}
+
+  /* ===== Sidebar ===== */
+  .sidebar{
+    width:280px;
+    min-width:280px;
+    background:var(--bg-secondary);
+    border-right:1px solid var(--border);
+    display:flex;
+    flex-direction:column;
+    overflow:hidden;
+  }
+  .sidebar-header{
+    padding:20px;
+    border-bottom:1px solid var(--border);
+  }
+  .sidebar-header h2{
+    font-size:16px;
+    font-weight:600;
+    letter-spacing:-0.3px;
+    color:var(--text-primary);
+    margin-bottom:12px;
+  }
+  .status-bar{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:8px 12px;
+    background:var(--bg-tertiary);
+    border-radius:var(--radius-sm);
+    font-size:12px;
+  }
+  .status-dot{
+    width:8px;height:8px;border-radius:50%;
+    background:var(--red);
+    flex-shrink:0;
+    transition:var(--transition);
+  }
+  .status-dot.connected{background:var(--green);}
+  .status-text{color:var(--text-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .conn-id{
+    display:block;
+    margin-top:8px;
+    padding:6px 10px;
+    background:var(--bg-primary);
+    border-radius:var(--radius-sm);
+    font-size:11px;
+    color:var(--text-muted);
+    font-family:monospace;
+    word-break:break-all;
+    line-height:1.4;
+    min-height:30px;
+  }
+  .btn-connect{
+    margin-top:10px;
+    width:100%;
+    padding:8px 0;
+    border:none;
+    border-radius:var(--radius-sm);
+    background:var(--accent);
+    color:#fff;
+    font-size:13px;
+    font-weight:500;
+    cursor:pointer;
+    transition:var(--transition);
+  }
+  .btn-connect:hover{background:var(--accent-hover);}
+  .btn-connect:disabled{opacity:0.5;cursor:not-allowed;}
+  .conn-btns{display:flex;gap:8px;margin-top:10px;}
+  .conn-btns .btn-connect{margin-top:0;flex:1;}
+  .btn-disconnect{
+    flex:1;
+    padding:8px 0;
+    border:none;
+    border-radius:var(--radius-sm);
+    background:var(--red);
+    color:#fff;
+    font-size:13px;
+    font-weight:500;
+    cursor:pointer;
+    transition:var(--transition);
+  }
+  .btn-disconnect:hover{opacity:0.85;}
+  .btn-disconnect:disabled{opacity:0.4;cursor:not-allowed;}
+
+  .sidebar-sections{
+    flex:1;
+    overflow-y:auto;
+    padding:12px;
+  }
+  .sidebar-sections::-webkit-scrollbar{width:4px;}
+  .sidebar-sections::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px;}
+
+  .section-label{
+    font-size:11px;
+    font-weight:600;
+    text-transform:uppercase;
+    letter-spacing:0.5px;
+    color:var(--text-muted);
+    padding:8px 8px 6px;
+  }
+  .session{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    padding:10px 12px;
+    border-radius:var(--radius);
+    cursor:pointer;
+    transition:var(--transition);
+    margin-bottom:2px;
+    position:relative;
+  }
+  .session:hover{background:var(--bg-hover);}
+  .session.active{background:var(--bg-active);}
+  .session-icon{
+    width:36px;height:36px;
+    border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-size:14px;
+    font-weight:600;
+    flex-shrink:0;
+  }
+  .session-icon.public{background:var(--accent-soft);color:var(--accent);}
+  .session-icon.group{background:var(--green-soft);color:var(--green);}
+  .session-icon.private{background:var(--orange-soft);color:var(--orange);}
+  .session-name{
+    font-size:13px;
+    font-weight:500;
+    color:var(--text-primary);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  }
+  .session-badge{
+    position:absolute;
+    right:10px;
+    top:50%;transform:translateY(-50%);
+    min-width:18px;height:18px;
+    border-radius:9px;
+    background:var(--accent);
+    color:#fff;
+    font-size:11px;
+    font-weight:600;
+    display:flex;align-items:center;justify-content:center;
+    padding:0 5px;
+    display:none;
+  }
+  .session-badge.show{display:flex;}
+
+  /* ===== Main ===== */
+  .main{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    background:var(--bg-primary);
+    overflow:hidden;
+  }
+
+  /* ===== Chat Header ===== */
+  .chat-header{
+    padding:16px 24px;
+    border-bottom:1px solid var(--border);
+    display:flex;
+    align-items:center;
+    gap:12px;
+    background:var(--bg-secondary);
+  }
+  .chat-header-icon{
+    width:32px;height:32px;
+    border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    font-size:13px;font-weight:600;
+  }
+  .chat-header-title{font-size:15px;font-weight:600;word-break:break-all;line-height:1.4;min-width:0;}
+  .chat-header-sub{font-size:12px;color:var(--text-muted);margin-left:auto;flex-shrink:0;}
+
+  /* ===== Chat Messages ===== */
+  .chat-container{
+    flex:1;
+    overflow-y:auto;
+    padding:20px 24px;
+    display:flex;
+    flex-direction:column;
+    gap:4px;
+  }
+  .chat-container::-webkit-scrollbar{width:6px;}
+  .chat-container::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px;}
+
+  .message-row{display:flex;max-width:70%;animation:fadeIn 0.2s ease;}
+  .message-row.self{align-self:flex-end;flex-direction:column;align-items:flex-end;}
+  .message-row.other{align-self:flex-start;flex-direction:row;align-items:flex-start;gap:8px;}
+  .msg-avatar{
+    width:32px;height:32px;
+    border-radius:50%;
+    background:var(--bg-active);
+    color:var(--text-secondary);
+    display:flex;align-items:center;justify-content:center;
+    font-size:13px;font-weight:600;font-family:monospace;
+    flex-shrink:0;
+    cursor:pointer;
+    transition:var(--transition);
+    border:2px solid transparent;
+    margin-top:2px;
+  }
+  .msg-avatar:hover{
+    border-color:var(--orange);
+    background:var(--orange-soft);
+    color:var(--orange);
+  }
+  .msg-avatar[title]:hover::after{
+    content:"";
+  }
+  .msg-bubble-col{display:flex;flex-direction:column;align-items:flex-start;min-width:0;}
+
+  @keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+  .bubble{
+    padding:10px 14px;
+    border-radius:var(--radius-lg);
+    font-size:14px;
+    line-height:1.5;
+    word-break:break-word;
+    position:relative;
+  }
+  .message-row.self .bubble{
+    background:var(--bubble-self);
+    color:#fff;
+    border-bottom-right-radius:4px;
+  }
+  .message-row.other .bubble{
+    background:var(--bubble-other);
+    color:var(--text-primary);
+    border-bottom-left-radius:4px;
+  }
+  .bubble .meta{
+    margin-top:6px;
+    font-size:11px;
+    opacity:0.6;
+    line-height:1.3;
+    word-break:break-all;
+    cursor:text;
+    user-select:text;
+  }
+  .message-row.self .bubble .meta{text-align:right;}
+  .meta-sender{
+    user-select:all;
+    cursor:text;
+    font-family:monospace;
+    font-size:10px;
+    display:inline;
+  }
+
+  .system-msg{
+    align-self:center;
+    padding:6px 16px;
+    background:var(--bg-tertiary);
+    border-radius:20px;
+    font-size:12px;
+    color:var(--text-muted);
+    margin:8px 0;
+  }
+
+  .empty-state{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    justify-content:center;
+    color:var(--text-muted);
+    gap:12px;
+  }
+  .empty-state svg{width:48px;height:48px;opacity:0.3;}
+  .empty-state p{font-size:14px;}
+
+  /* ===== Input Area ===== */
+  .input-area{
+    padding:16px 24px;
+    border-top:1px solid var(--border);
+    background:var(--bg-secondary);
+  }
+  .input-controls{
+    display:flex;
+    gap:8px;
+    margin-bottom:10px;
+    flex-wrap:wrap;
+  }
+  .input-controls input[type="text"]{
+    flex:1;
+    min-width:120px;
+    padding:8px 12px;
+    background:var(--bg-tertiary);
+    border:1px solid var(--border);
+    border-radius:var(--radius-sm);
+    color:var(--text-primary);
+    font-size:13px;
+    outline:none;
+    transition:var(--transition);
+  }
+  .input-controls input[type="text"]:focus{border-color:var(--accent);}
+  .input-controls input[type="text"]::placeholder{color:var(--text-muted);}
+
+  .btn{
+    padding:8px 14px;
+    border:none;
+    border-radius:var(--radius-sm);
+    font-size:12px;
+    font-weight:500;
+    cursor:pointer;
+    transition:var(--transition);
+    white-space:nowrap;
+  }
+  .btn-primary{background:var(--accent);color:#fff;}
+  .btn-primary:hover{background:var(--accent-hover);}
+  .btn-success{background:var(--green);color:#fff;}
+  .btn-success:hover{opacity:0.85;}
+  .btn-warning{background:var(--orange);color:#000;}
+  .btn-warning:hover{opacity:0.85;}
+  .btn-danger{background:var(--red);color:#fff;}
+  .btn-danger:hover{opacity:0.85;}
+  .btn:disabled{opacity:0.4;cursor:not-allowed;}
+
+  .msg-input-row{display:flex;gap:8px;}
+  .msg-input-row input[type="text"]{
+    flex:1;
+    padding:10px 16px;
+    background:var(--bg-tertiary);
+    border:1px solid var(--border);
+    border-radius:var(--radius-lg);
+    color:var(--text-primary);
+    font-size:14px;
+    outline:none;
+    transition:var(--transition);
+  }
+  .msg-input-row input[type="text"]:focus{border-color:var(--accent);}
+  .msg-input-row input[type="text"]::placeholder{color:var(--text-muted);}
+  .btn-send{
+    width:40px;height:40px;
+    border:none;
+    border-radius:50%;
+    background:var(--accent);
+    color:#fff;
+    cursor:pointer;
+    display:flex;align-items:center;justify-content:center;
+    transition:var(--transition);
+    flex-shrink:0;
+  }
+  .btn-send:hover{background:var(--accent-hover);}
+  .btn-send:disabled{opacity:0.4;cursor:not-allowed;}
+  .btn-send svg{width:18px;height:18px;}
+
+  /* ===== Toast ===== */
+  .toast-container{
+    position:fixed;top:20px;right:20px;
+    display:flex;flex-direction:column;gap:8px;z-index:1000;
+  }
+  .toast{
+    padding:10px 16px;
+    border-radius:var(--radius);
+    font-size:13px;
+    color:#fff;
+    box-shadow:var(--shadow);
+    animation:slideIn 0.3s ease,fadeOut 0.3s ease 2.7s forwards;
+  }
+  .toast.info{background:var(--accent);}
+  .toast.success{background:var(--green);}
+  .toast.error{background:var(--red);}
+
+  @keyframes slideIn{from{transform:translateX(100%);opacity:0;}to{transform:translateX(0);opacity:1;}}
+  @keyframes fadeOut{to{opacity:0;transform:translateY(-10px);}}
+
+  /* ===== Responsive ===== */
+  @media(max-width:768px){
+    .sidebar{width:220px;min-width:220px;}
+    .message-row{max-width:85%;}
+  }
+  @media(max-width:560px){
+    .app{flex-direction:column;}
+    .sidebar{
+      width:100%;min-width:100%;
+      max-height:180px;
+      border-right:none;
+      border-bottom:1px solid var(--border);
+    }
+    .sidebar-header{padding:12px;}
+    .sidebar-sections{padding:8px;display:flex;gap:6px;overflow-x:auto;overflow-y:hidden;}
+    .session{flex-shrink:0;}
+    .section-label{display:none;}
+  }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h2>SignalR Chat</h2>
+      <div class="status-bar">
+        <span class="status-dot" id="statusDot"></span>
+        <span class="status-text" id="status">未连接</span>
+      </div>
+      <div class="conn-id" id="connectionId">--</div>
+      <div class="conn-btns">
+        <button class="btn-connect" id="btnConnect" onclick="initConnection()">连接 SignalR 服务器</button>
+        <button class="btn-disconnect" id="btnDisconnect" onclick="disconnect()" disabled>断开连接</button>
+      </div>
+    </div>
+    <div class="sidebar-sections" id="sessionList">
+      <div class="section-label">会话列表</div>
+    </div>
+  </aside>
+
+  <!-- Main Area -->
+  <div class="main">
+    <div class="chat-header" id="chatHeader">
+      <div class="chat-header-icon public" id="chatHeaderIcon">P</div>
+      <span class="chat-header-title" id="chatHeaderTitle">公共频道</span>
+      <span class="chat-header-sub" id="chatHeaderSub">广播消息</span>
+    </div>
+
+    <div class="chat-container" id="chatContainer">
+      <div class="empty-state" id="emptyState">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>
+        </svg>
+        <p>请先连接服务器，然后开始聊天</p>
+      </div>
+    </div>
+
+    <div class="input-area">
+      <div class="input-controls">
+        <input type="text" id="targetUser" placeholder="私聊目标 ConnectionId" />
+        <button class="btn btn-warning" onclick="openPrivateChat()" disabled id="btnSendUser">开始私聊</button>
+        <input type="text" id="groupName" placeholder="组名" />
+        <button class="btn btn-success" onclick="joinGroup()" disabled id="btnJoinGroup">加入组</button>
+        <button class="btn btn-danger" onclick="leaveGroup()" disabled id="btnLeaveGroup">退出组</button>
+        <button class="btn btn-primary" onclick="sendGroup()" disabled id="btnSendGroup">发送到组</button>
+      </div>
+      <div class="msg-input-row">
+        <input type="text" id="message" placeholder="输入消息内容，Enter 发送..." onkeydown="handleKeyDown(event)" />
+        <button class="btn-send" onclick="smartSend()" disabled id="btnSend">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+  /* ================= State ================= */
+  let connection = null;
+  let chatSections = {};
+  let currentSection = "public";
+  let connectionId = null;
+
+  /* ================= Toast ================= */
+  function showToast(msg, type) {
+    type = type || "info";
+    var container = document.getElementById("toastContainer");
+    var toast = document.createElement("div");
+    toast.className = "toast " + type;
+    toast.textContent = msg;
+    container.appendChild(toast);
+    setTimeout(function() { toast.remove(); }, 3000);
+  }
+
+  /* ================= 初始化连接 ================= */
+  function initConnection() {
+    var btn = document.getElementById("btnConnect");
+    btn.disabled = true;
+    btn.textContent = "连接中...";
+    document.getElementById("status").textContent = "连接中...";
+
+    connection = new signalR.HubConnectionBuilder()
+      .withUrl("http://localhost:5097/chatHub")
+      .withAutomaticReconnect()
+      .build();
+
+    /* 接收服务器确认 connectionId */
+    connection.on("ConnectionAck", function(id) {
+      connectionId = id;
+      document.getElementById("connectionId").textContent = id;
+      document.getElementById("status").textContent = "已连接";
+      document.getElementById("statusDot").classList.add("connected");
+      btn.textContent = "已连接";
+      btn.disabled = true;
+      document.getElementById("btnDisconnect").disabled = false;
+      enableButtons(true);
+      createSection("public");
+      showToast("连接成功! ID: " + id, "success");
+
+      /* 重���后重新加入所有已有的组 */
+      Object.keys(chatSections).forEach(function(key) {
+        if (key !== "public" && !key.startsWith("pm_")) {
+          connection.invoke("JoinGroup", key).catch(function() {});
+        }
+      });
+    });
+
+    /* 接收消息（广播 / 组 / 私聊） */
+    connection.on("ReceiveMessage", function(msg) {
+      appendMessage(msg, true);
+    });
+
+    /* 断线事件 */
+    connection.onclose(function() {
+      document.getElementById("status").textContent = "已断开";
+      document.getElementById("statusDot").classList.remove("connected");
+      enableButtons(false);
+      document.getElementById("btnDisconnect").disabled = true;
+      btn.disabled = false;
+      btn.textContent = "重新连接";
+      showToast("连接已断开", "error");
+    });
+
+    /* 重连中 */
+    connection.onreconnecting(function() {
+      document.getElementById("status").textContent = "重连中...";
+      document.getElementById("statusDot").classList.remove("connected");
+      showToast("正在重新连接...", "info");
+    });
+
+    /* 重连成功 */
+    connection.onreconnected(function(newId) {
+      document.getElementById("status").textContent = "已重连";
+      document.getElementById("statusDot").classList.add("connected");
+      showToast("重连成功!", "success");
+    });
+
+    connection.start()
+      .then(function() {
+        console.log("SignalR ���连接");
+      })
+      .catch(function(err) {
+        console.error("SignalR 连接失败:", err);
+        document.getElementById("status").textContent = "连接失败";
+        btn.disabled = false;
+        btn.textContent = "重新连接";
+        showToast("连接失败: " + err.message, "error");
+      });
+  }
+
+  /* ================= 手动断开连接 ================= */
+  async function disconnect() {
+    if (!connection) {
+      showToast("当前未创建连接", "error");
+      return;
+    }
+    if (connection.state === signalR.HubConnectionState.Disconnected) {
+      showToast("已经是断开状态", "error");
+      return;
+    }
+    var disconnectBtn = document.getElementById("btnDisconnect");
+    disconnectBtn.disabled = true;
+    disconnectBtn.textContent = "断开中...";
+    try {
+      await connection.stop();
+      connectionId = null;
+      document.getElementById("connectionId").textContent = "--";
+      showToast("已手动断开连接", "success");
+    } catch (err) {
+      showToast("断开失败: " + err.message, "error");
+    }
+    disconnectBtn.textContent = "断开连接";
+  }
+
+  /* ================= 按钮启用/禁用 ================= */
+  function enableButtons(enable) {
+    document.getElementById("btnSendUser").disabled = !enable;
+    document.getElementById("btnJoinGroup").disabled = !enable;
+    document.getElementById("btnLeaveGroup").disabled = !enable;
+    document.getElementById("btnSendGroup").disabled = !enable;
+    document.getElementById("btnSend").disabled = !enable;
+  }
+
+  /* ================= 创建消息对象 ================= */
+  function createMessage(group, target, receiver) {
+    return {
+      Sender: connectionId,
+      Receiver: receiver || null,
+      Content: document.getElementById("message").value,
+      SendTime: new Date().toISOString(),
+      Group: group || null,
+      Target: target || null
+    };
+  }
+
+  /* ================= 智能发送 ================= */
+  function smartSend() {
+    if (!connectionId) return;
+    var msgVal = document.getElementById("message").value.trim();
+    if (!msgVal) return;
+
+    if (currentSection === "public") {
+      sendAll();
+    } else if (currentSection.startsWith("pm_")) {
+      var target = currentSection.substring(3);
+      sendUser(target);
+    } else {
+      document.getElementById("groupName").value = currentSection;
+      sendGroup();
+    }
+  }
+
+  /* ================= 广播消息 ================= */
+  function sendAll() {
+    if (!connectionId) return;
+    var msgVal = document.getElementById("message").value.trim();
+    if (!msgVal) return;
+    var msg = createMessage();
+    connection.invoke("BroadcastMessage", msg)
+      .catch(function(err) { showToast("发送失败: " + err.message, "error"); });
+    document.getElementById("message").value = "";
+  }
+
+  /* ================= 开始私聊（创建分区并切换） ================= */
+  function openPrivateChat() {
+    if (!connectionId) { showToast("请先连接 SignalR 服务器", "error"); return; }
+    var target = document.getElementById("targetUser").value.trim();
+    if (!target) { showToast("请输入私聊目标 ConnectionId", "error"); return; }
+    if (target === connectionId) { showToast("不能和自己私聊", "error"); return; }
+
+    var sectionKey = "pm_" + target;
+    if (!chatSections[sectionKey]) createSection(sectionKey);
+    switchSection(sectionKey);
+    showToast("已打开与 " + target + " 的私聊", "success");
+  }
+
+  /* ================= 私聊消息（在分区内发送） ================= */
+  function sendUser(targetOverride) {
+    if (!connectionId) return;
+    var target = targetOverride || document.getElementById("targetUser").value.trim();
+    if (!target) { showToast("请输入私聊目标 ID", "error"); return; }
+    var msgVal = document.getElementById("message").value.trim();
+    if (!msgVal) return;
+
+    var msg = createMessage(null, target, target);
+    var sectionKey = "pm_" + target;
+
+    /* 发送方本地存储并渲染 */
+    if (!chatSections[sectionKey]) createSection(sectionKey);
+    chatSections[sectionKey].push(msg);
+
+    if (currentSection === sectionKey) {
+      renderSingleMessage(msg, false);
+    }
+
+    connection.invoke("SendMessageToUser", target, msg)
+      .catch(function(err) { showToast("私聊发送失败: " + err.message, "error"); });
+    document.getElementById("message").value = "";
+  }
+
+  /* ================= 加入组 ================= */
+  function joinGroup() {
+    if (!connectionId) return;
+    var group = document.getElementById("groupName").value.trim();
+    if (!group) { showToast("请输入组名", "error"); return; }
+
+    connection.invoke("JoinGroup", group)
+      .then(function() {
+        createSection(group);
+        switchSection(group);
+        showToast("已加入组: " + group, "success");
+      })
+      .catch(function(err) { showToast("加入组失败: " + err.message, "error"); });
+  }
+
+  /* ================= 退出组 ================= */
+  function leaveGroup() {
+    if (!connection || !connectionId) { showToast("请先连接 SignalR 服务器", "error"); return; }
+    var group = document.getElementById("groupName").value.trim();
+    if (!group) { showToast("请输入组名", "error"); return; }
+
+    if (!chatSections[group]) {
+      showToast("你不在组 " + group + " 中", "error");
+      return;
+    }
+
+    connection.invoke("LeaveGroup", group)
+      .then(function() {
+        showToast("已退出组: " + group, "success");
+
+        /* 删除该分区数据 */
+        delete chatSections[group];
+
+        /* 从侧边栏中移除该会话 */
+        var sessionEl = document.querySelector('.session[data-section="' + group + '"]');
+        if (sessionEl) sessionEl.remove();
+
+        /* 如果当前正在查看该组，切换到其他分区 */
+        if (currentSection === group) {
+          var keys = Object.keys(chatSections);
+          if (keys.length > 0) {
+            switchSection(keys[0]);
+          } else {
+            currentSection = "public";
+            createSection("public");
+            switchSection("public");
+          }
+        }
+      })
+      .catch(function(err) { showToast("退出组失败: " + err.message, "error"); });
+  }
+
+  /* ================= 组消息 ================= */
+  function sendGroup() {
+    if (!connectionId) return;
+    var group = document.getElementById("groupName").value.trim();
+    if (!group) { showToast("请输入组名", "error"); return; }
+    var msgVal = document.getElementById("message").value.trim();
+    if (!msgVal) return;
+
+    var msg = createMessage(group);
+    connection.invoke("SendMessageToGroup", group, msg)
+      .catch(function(err) { showToast("组消息发送失败: " + err.message, "error"); });
+    document.getElementById("message").value = "";
+  }
+
+  /* ================= 回车发送 ================= */
+  function handleKeyDown(e) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      smartSend();
+    }
+  }
+
+  /* ================= 消息渲染 ================= */
+  function appendMessage(msg, store) {
+    var sender = msg.sender || msg.Sender;
+    var content = msg.content || msg.Content;
+    var time = new Date(msg.sendTime || msg.SendTime || new Date());
+    var group = msg.group || msg.Group || null;
+    var target = msg.target || msg.Target || null;
+    var receiver = msg.receiver || msg.Receiver || null;
+
+    var section;
+    if (group) {
+      /* 组消息 */
+      section = group;
+    } else if (receiver) {
+      /*
+       * 有 Receiver 字段 → 一定是私聊消息
+       * - Receiver 等于自己 → 别人发给自己的，归入 pm_sender
+       * - Receiver 不等于自己 → 自己发的（不应走到这里，发送方本地已处理），
+       *   但作为 fallback 归入 pm_receiver
+       */
+      if (receiver === connectionId) {
+        section = "pm_" + sender;
+      } else {
+        section = "pm_" + receiver;
+      }
+    } else if (target) {
+      /*
+       * 兼容旧逻辑：有 Target 但无 Receiver
+       */
+      if (sender === connectionId) {
+        section = "pm_" + target;
+      } else {
+        section = "pm_" + sender;
+      }
+    } else {
+      /* 无 Group、无 Receiver、无 Target → 广播消息 */
+      section = "public";
+    }
+
+    if (store) {
+      if (!chatSections[section]) createSection(section);
+      chatSections[section].push(msg);
+
+      /* 如果不是当前分区，显示未读标记 */
+      if (section !== currentSection) {
+        showBadge(section);
+      }
+    }
+
+    /* 只渲染当前分区 */
+    if (section !== currentSection) return;
+
+    renderSingleMessage(msg, store);
+  }
+
+  function renderSingleMessage(msg, animate) {
+    var sender = msg.sender || msg.Sender;
+    var content = msg.content || msg.Content;
+    var time = new Date(msg.sendTime || msg.SendTime || new Date());
+    var isSelf = sender === connectionId;
+
+    var emptyState = document.getElementById("emptyState");
+    if (emptyState) emptyState.remove();
+
+    var container = document.getElementById("chatContainer");
+    var row = document.createElement("div");
+    row.className = "message-row " + (isSelf ? "self" : "other");
+
+    /* 非自己的消息：添加可点击头像（仅在公共和组频道中可跳转私聊） */
+    if (!isSelf && sender) {
+      var avatar = document.createElement("div");
+      avatar.className = "msg-avatar";
+      avatar.textContent = sender.charAt(0).toUpperCase();
+      avatar.title = "点击私聊 " + sender;
+      avatar.onclick = (function(sid) {
+        return function(e) {
+          e.stopPropagation();
+          openPmFromAvatar(sid);
+        };
+      })(sender);
+      row.appendChild(avatar);
+    }
+
+    var bubbleCol = document.createElement("div");
+    bubbleCol.className = "msg-bubble-col";
+    if (isSelf) {
+      bubbleCol.style.alignItems = "flex-end";
+    }
+
+    var bubble = document.createElement("div");
+    bubble.className = "bubble";
+
+    var contentDiv = document.createElement("div");
+    contentDiv.textContent = content;
+
+    var metaDiv = document.createElement("div");
+    metaDiv.className = "meta";
+    var senderDisplay = sender || "unknown";
+    var timeStr = time.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    metaDiv.innerHTML = '<span class="meta-sender" title="' + senderDisplay + '">' + senderDisplay + '</span> &middot; ' + timeStr;
+
+    bubble.appendChild(contentDiv);
+    bubble.appendChild(metaDiv);
+    bubbleCol.appendChild(bubble);
+    row.appendChild(bubbleCol);
+    container.appendChild(row);
+
+    /* 自动滚动到底部 */
+    container.scrollTop = container.scrollHeight;
+  }
+
+  /* ================= 通过头像跳转私聊 ================= */
+  function openPmFromAvatar(senderId) {
+    if (!connectionId) { showToast("请先连接 SignalR 服务器", "error"); return; }
+    if (senderId === connectionId) return;
+
+    var sectionKey = "pm_" + senderId;
+    if (!chatSections[sectionKey]) createSection(sectionKey);
+    switchSection(sectionKey);
+    showToast("已打开与 " + senderId + " 的私聊", "success");
+  }
+
+  /* ================= 创建分区 / 会话 ================= */
+  function createSection(name) {
+    if (chatSections[name]) return;
+    chatSections[name] = [];
+
+    var list = document.getElementById("sessionList");
+    var div = document.createElement("div");
+    div.className = "session";
+    div.setAttribute("data-section", name);
+
+    var icon = document.createElement("div");
+    icon.className = "session-icon";
+
+    var nameSpan = document.createElement("span");
+    nameSpan.className = "session-name";
+
+    var badge = document.createElement("span");
+    badge.className = "session-badge";
+    badge.id = "badge_" + name;
+
+    if (name === "public") {
+      icon.classList.add("public");
+      icon.textContent = "P";
+      nameSpan.textContent = "公共频道";
+    } else if (name.startsWith("pm_")) {
+      icon.classList.add("private");
+      var uid = name.substring(3);
+      icon.textContent = uid.charAt(0).toUpperCase();
+      nameSpan.textContent = uid;
+      nameSpan.title = uid;
+      nameSpan.style.fontSize = "11px";
+      nameSpan.style.wordBreak = "break-all";
+      nameSpan.style.whiteSpace = "normal";
+      nameSpan.style.lineHeight = "1.3";
+    } else {
+      icon.classList.add("group");
+      icon.textContent = "G";
+      nameSpan.textContent = name;
+    }
+
+    div.appendChild(icon);
+    div.appendChild(nameSpan);
+    div.appendChild(badge);
+
+    div.onclick = function() { switchSection(name); };
+    list.appendChild(div);
+
+    if (Object.keys(chatSections).length === 1) {
+      switchSection(name);
+    }
+  }
+
+  function switchSection(name) {
+    currentSection = name;
+
+    /* 更新侧边栏高亮 */
+    var sessions = document.querySelectorAll(".session");
+    sessions.forEach(function(s) {
+      s.classList.remove("active");
+      if (s.getAttribute("data-section") === name) {
+        s.classList.add("active");
+      }
+    });
+
+    /* 隐藏未读标记 */
+    hideBadge(name);
+
+    /* 更新头部 */
+    updateChatHeader(name);
+
+    /* 渲染消息 */
+    renderMessages();
+  }
+
+  function updateChatHeader(name) {
+    var iconEl = document.getElementById("chatHeaderIcon");
+    var titleEl = document.getElementById("chatHeaderTitle");
+    var subEl = document.getElementById("chatHeaderSub");
+
+    iconEl.className = "chat-header-icon";
+
+    if (name === "public") {
+      iconEl.classList.add("public");
+      iconEl.textContent = "P";
+      titleEl.textContent = "公共频道";
+      subEl.textContent = "广播消息";
+    } else if (name.startsWith("pm_")) {
+      var pmUid = name.substring(3);
+      iconEl.classList.add("private");
+      iconEl.textContent = pmUid.charAt(0).toUpperCase();
+      titleEl.textContent = "私聊: " + pmUid;
+      subEl.textContent = "私密消息";
+    } else {
+      iconEl.classList.add("group");
+      iconEl.textContent = "G";
+      titleEl.textContent = "组: " + name;
+      subEl.textContent = "组消息";
+    }
+  }
+
+  function renderMessages() {
+    var container = document.getElementById("chatContainer");
+    container.innerHTML = "";
+    var msgs = chatSections[currentSection] || [];
+    if (msgs.length === 0) {
+      var empty = document.createElement("div");
+      empty.className = "empty-state";
+      empty.id = "emptyState";
+      empty.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg><p>暂无消息，开始聊天吧</p>';
+      container.appendChild(empty);
+      return;
+    }
+    msgs.forEach(function(msg) {
+      renderSingleMessage(msg, false);
+    });
+  }
+
+  /* ================= 未读标记 ================= */
+  function showBadge(section) {
+    var badge = document.getElementById("badge_" + section);
+    if (badge) {
+      var count = parseInt(badge.textContent || "0") + 1;
+      badge.textContent = count;
+      badge.classList.add("show");
+    }
+  }
+
+  function hideBadge(section) {
+    var badge = document.getElementById("badge_" + section);
+    if (badge) {
+      badge.textContent = "";
+      badge.classList.remove("show");
+    }
+  }
+</script>
+
+</body>
+</html>
